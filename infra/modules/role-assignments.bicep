@@ -1,9 +1,6 @@
 @description('Principal ID of the App Service managed identity.')
 param appServicePrincipalId string
 
-@description('Principal ID of the deploying user (for local dev access).')
-param userPrincipalId string = ''
-
 @description('Resource ID of the Azure OpenAI account.')
 param openAiAccountId string
 
@@ -64,16 +61,6 @@ resource openAiRoleAppService 'Microsoft.Authorization/roleAssignments@2022-04-0
   }
 }
 
-resource openAiRoleUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(userPrincipalId)) {
-  name: guid(openAiAccountId, userPrincipalId, cognitiveServicesOpenAiUserRoleId)
-  scope: openAiAccount
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', cognitiveServicesOpenAiUserRoleId)
-    principalId: userPrincipalId
-    principalType: 'User'
-  }
-}
-
 // ─── Azure AI Search: Search Index Data Reader ────────────────────────────────
 
 resource searchDataReaderRoleAppService 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
@@ -83,16 +70,6 @@ resource searchDataReaderRoleAppService 'Microsoft.Authorization/roleAssignments
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', searchIndexDataReaderRoleId)
     principalId: appServicePrincipalId
     principalType: 'ServicePrincipal'
-  }
-}
-
-resource searchDataReaderRoleUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(userPrincipalId)) {
-  name: guid(searchServiceId, userPrincipalId, searchIndexDataReaderRoleId)
-  scope: searchService
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', searchIndexDataReaderRoleId)
-    principalId: userPrincipalId
-    principalType: 'User'
   }
 }
 
@@ -120,16 +97,6 @@ resource cosmosControlPlaneRoleAppService 'Microsoft.Authorization/roleAssignmen
   }
 }
 
-resource cosmosControlPlaneRoleUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(userPrincipalId)) {
-  name: guid(cosmosAccountId, userPrincipalId, documentDbAccountContributorRoleId)
-  scope: cosmosAccount
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', documentDbAccountContributorRoleId)
-    principalId: userPrincipalId
-    principalType: 'User'
-  }
-}
-
 // ─── Cosmos DB: Built-in Data Contributor (data plane) ────────────────────────
 // Data-plane roles use the native CosmosDB SQL role assignment resource type,
 // not standard ARM role assignments.
@@ -144,12 +111,4 @@ resource cosmosDataRoleAppService 'Microsoft.DocumentDB/databaseAccounts/sqlRole
   }
 }
 
-resource cosmosDataRoleUser 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = if (!empty(userPrincipalId)) {
-  parent: cosmosAccount
-  name: guid(cosmosAccountId, userPrincipalId, cosmosDataContributorRoleDefinitionId)
-  properties: {
-    roleDefinitionId: '${cosmosAccount.id}/sqlRoleDefinitions/${cosmosDataContributorRoleDefinitionId}'
-    principalId: userPrincipalId
-    scope: cosmosAccount.id
-  }
-}
+

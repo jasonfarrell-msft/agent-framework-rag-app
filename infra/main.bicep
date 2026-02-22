@@ -8,9 +8,6 @@ param location string = resourceGroup().location
 @description('Base name used to generate resource names (e.g., "pseg-main-eus2-mx01").')
 param baseName string
 
-@description('Object ID of the deploying user for local dev RBAC grants. Leave empty to skip user role assignments.')
-param userPrincipalId string = ''
-
 @description('Name of the Azure OpenAI model deployment.')
 param openAiDeploymentName string = 'gpt-4.1-deployment'
 
@@ -112,7 +109,6 @@ module staticWebApp 'modules/static-web-app.bicep' = {
 module roleAssignments 'modules/role-assignments.bicep' = {
   params: {
     appServicePrincipalId: appService.outputs.principalId
-    userPrincipalId: userPrincipalId
     openAiAccountId: openAi.outputs.id
     openAiAccountName: openAiAccountName
     cosmosAccountId: cosmos.outputs.id
