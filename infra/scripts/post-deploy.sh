@@ -8,6 +8,9 @@
 #
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
 RESOURCE_GROUP="${1:?Usage: $0 <resource-group> [search-index-name]}"
 SEARCH_INDEX_NAME="${2:-multimodal-rag-1771601932521-single-manual}"
 
