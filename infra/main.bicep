@@ -37,7 +37,6 @@ var cosmosAccountName = 'cosmos-${baseName}'
 var searchServiceName = 'search-${baseName}'
 var appServicePlanName = 'plan-${baseName}'
 var webAppName = 'app-${baseName}'
-var staticWebAppName = 'swa-${baseName}'
 
 // ─── Modules ──────────────────────────────────────────────────────────────────
 
@@ -98,14 +97,6 @@ module appService 'modules/app-service.bicep' = {
   }
 }
 
-module staticWebApp 'modules/static-web-app.bicep' = {
-  params: {
-    location: location
-    staticWebAppName: staticWebAppName
-    tags: tags
-  }
-}
-
 module roleAssignments 'modules/role-assignments.bicep' = {
   params: {
     appServicePrincipalId: appService.outputs.principalId
@@ -122,9 +113,6 @@ module roleAssignments 'modules/role-assignments.bicep' = {
 
 @description('The Web App default hostname.')
 output webAppHostName string = appService.outputs.defaultHostName
-
-@description('The Static Web App default hostname.')
-output staticWebAppHostName string = staticWebApp.outputs.defaultHostName
 
 @description('Azure OpenAI endpoint.')
 output openAiEndpoint string = openAi.outputs.endpoint
