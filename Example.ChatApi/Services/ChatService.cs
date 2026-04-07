@@ -1,178 +1,168 @@
-using System.Diagnostics.CodeAnalysis;
-using System.Text;
-using Azure.AI.OpenAI;
+using System.Collections.Concurrent;
+using System.Text.Json;
+using Azure.Core;
 using Azure.Data.Tables;
 using Azure.Identity;
-using Microsoft.Agents.AI;
-using Microsoft.Azure.Cosmos;
-using Microsoft.Extensions.AI;
+using OpenAI;
 using OpenAI.Chat;
-using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 
 namespace Example.ChatApi.Services;
 
-public class ChatService : IDisposable
+public class ChatService
 {
-    private readonly ChatClient _chatClient;
-    private readonly IConfiguration _configuration;
+    private readonly DefaultAzureCredential _credential;
+    private readonly string _foundryEndpoint;
+    private readonly string _modelName;
+    private readonly TableClient _tableClient;
+    private readonly ConcurrentDictionary<string, List<ChatMessage>> _conversations = new();
 
-    // Cosmos DB (optional, used when ChatHistoryProvider is "Cosmos")
-    private readonly CosmosClient? _cosmosClient;
-    private readonly string? _cosmosDatabaseId;
-    private readonly string? _cosmosContainerId;
+    private static readonly string[] s_tokenScopes = ["https://ai.azure.com/.default"];
+    private AccessToken _cachedToken;
+    private ChatClient? _chatClient;
+    private readonly object _clientLock = new();
 
-    // Table Storage (optional, used when ChatHistoryProvider is "TableStorage")
-    private readonly TableClient? _tableClient;
-
-    private readonly string _chatHistoryProviderType;
-
-    public const string SystemPrompt = """
-        You are a helpful assistant that specializes in communicating with electrical field workers. You present clean and concise responses and cite where you got your responses.
-
-        You only consider information available in the results and do not use any other information.
-
-        Format your entire response in valid Markdown.
-
-        For inline citations, use HTML superscript tags like <sup>[1](#)</sup>, <sup>[2](#)</sup>, etc. Do NOT use caret (^) notation.
-
-        At the end of your response, list all unique source documents as a numbered Markdown list with clickable links. Use this format:
-        1. [Document Title](https://myfiles.com/files/<document_title>)
-
-        The document title comes from the "document_title" field.
-        The url will be 'https://myfiles.com/files/<document title>'
-        """;
+    private const string SystemPrompt =
+        "You are a helpful conversational assistant. Provide clear and concise responses. Format responses in Markdown when appropriate.";
 
     public ChatService(IConfiguration configuration)
     {
-        Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] ChatService: Initializing Agent Framework...");
+        _credential = new DefaultAzureCredential();
 
-        _configuration = configuration;
-        var credential = new DefaultAzureCredential();
+        _foundryEndpoint = configuration["Foundry:Endpoint"]
+            ?? throw new InvalidOperationException("Foundry:Endpoint is not configured.");
+        _modelName = configuration["Foundry:ModelName"]
+            ?? throw new InvalidOperationException("Foundry:ModelName is not configured.");
 
-        var openAiEndpoint = configuration["AzureOpenAI:Endpoint"]
-            ?? throw new InvalidOperationException("AzureOpenAI:Endpoint is not configured.");
-        var deploymentName = configuration["AzureOpenAI:DeploymentName"]
-            ?? throw new InvalidOperationException("AzureOpenAI:DeploymentName is not configured.");
+        // Warm up the client
+        _chatClient = CreateChatClient();
 
-        _chatClient = new AzureOpenAIClient(new Uri(openAiEndpoint), credential)
-            .GetChatClient(deploymentName);
+        var tableEndpoint = configuration["TableStorage:Endpoint"]
+            ?? throw new InvalidOperationException("TableStorage:Endpoint is not configured.");
+        var tableName = configuration["TableStorage:TableName"]
+            ?? throw new InvalidOperationException("TableStorage:TableName is not configured.");
 
-        _chatHistoryProviderType = configuration["ChatHistory:Provider"] ?? "Cosmos";
+        _tableClient = new TableClient(new Uri(tableEndpoint), tableName, _credential);
+        _tableClient.CreateIfNotExists();
 
-        if (_chatHistoryProviderType.Equals("TableStorage", StringComparison.OrdinalIgnoreCase))
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] ChatService: Initialized with Foundry endpoint and Table Storage history.");
+    }
+
+    private ChatClient GetChatClient()
+    {
+        lock (_clientLock)
         {
-            var tableEndpoint = configuration["TableStorage:Endpoint"]
-                ?? throw new InvalidOperationException("TableStorage:Endpoint is not configured.");
-            var tableName = configuration["TableStorage:TableName"]
-                ?? throw new InvalidOperationException("TableStorage:TableName is not configured.");
-
-            _tableClient = new TableClient(new Uri(tableEndpoint), tableName, credential);
-
-            Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] ChatService: Using Table Storage chat history.");
+            // Refresh client if token expires within 5 minutes
+            if (_chatClient == null || _cachedToken.ExpiresOn < DateTimeOffset.UtcNow.AddMinutes(5))
+            {
+                _chatClient = CreateChatClient();
+            }
+            return _chatClient;
         }
-        else
+    }
+
+    private ChatClient CreateChatClient()
+    {
+        _cachedToken = _credential.GetToken(new TokenRequestContext(s_tokenScopes), default);
+        var apiCredential = new System.ClientModel.ApiKeyCredential(_cachedToken.Token);
+        var options = new OpenAIClientOptions
         {
-            var cosmosEndpoint = configuration["CosmosDb:Endpoint"]
-                ?? throw new InvalidOperationException("CosmosDb:Endpoint is not configured.");
-            _cosmosDatabaseId = configuration["CosmosDb:DatabaseId"]
-                ?? throw new InvalidOperationException("CosmosDb:DatabaseId is not configured.");
-            _cosmosContainerId = configuration["CosmosDb:ContainerId"]
-                ?? throw new InvalidOperationException("CosmosDb:ContainerId is not configured.");
-
-            _cosmosClient = new CosmosClient(cosmosEndpoint, credential);
-
-            Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] ChatService: Using Cosmos DB chat history.");
-        }
-
-        Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] ChatService: Initialized.");
+            Endpoint = new Uri($"{_foundryEndpoint.TrimEnd('/')}/openai/v1")
+        };
+        return new OpenAIClient(apiCredential, options).GetChatClient(_modelName);
     }
 
-    [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "Not using trimming")]
-    [UnconditionalSuppressMessage("AOT", "IL3050", Justification = "Not using NativeAOT")]
-    public async Task<string> GetResponseAsync(
-        string conversationId,
-        string userQuery,
-        IReadOnlyList<SearchResultContext> searchResults)
+    public async Task<string> GetResponseAsync(string conversationId, string userMessage)
     {
-        Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] Chat: Setting up agent for conversation '{conversationId}'...");
+        // Load history from Table Storage on first access for this conversation
+        var history = _conversations.GetOrAdd(conversationId, id => LoadHistory(id));
 
-        Func<IEnumerable<ChatMessage>, IEnumerable<ChatMessage>> storeFilter = messages => messages.Where(m =>
-            m.GetAgentRequestMessageSourceType() != AgentRequestMessageSourceType.AIContextProvider &&
-            m.GetAgentRequestMessageSourceType() != AgentRequestMessageSourceType.ChatHistory);
-
-        ChatHistoryProvider chatHistoryProvider = _chatHistoryProviderType.Equals("TableStorage", StringComparison.OrdinalIgnoreCase)
-            ? new TableStorageChatHistoryProvider(
-                _tableClient!,
-                conversationId,
-                storeInputMessageFilter: storeFilter)
-            : new CosmosChatHistoryProvider(
-                _cosmosClient!,
-                _cosmosDatabaseId!,
-                _cosmosContainerId!,
-                _ => new CosmosChatHistoryProvider.State(conversationId),
-                ownsClient: false,
-                storeInputMessageFilter: storeFilter);
-
-        // Create a search-context provider that injects RAG results without persisting them.
-        var searchContextProvider = new SearchResultsContextProvider(searchResults);
-
-        // Create a lightweight per-request agent (ChatClient and shared clients are singletons).
-        AIAgent agent = _chatClient.AsAIAgent(new ChatClientAgentOptions
+        lock (history)
         {
-            Name = "TechManualAssistant",
-            ChatOptions = new ChatOptions { Instructions = SystemPrompt },
-            ChatHistoryProvider = chatHistoryProvider,
-            AIContextProviders = [searchContextProvider]
-        });
-
-        var session = await agent.CreateSessionAsync();
-
-        Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] Chat: Running agent...");
-
-        var response = await agent.RunAsync(userQuery, session);
-
-        Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] Chat: Response complete.");
-
-        return response.Text;
-    }
-
-    public void Dispose()
-    {
-        _cosmosClient?.Dispose();
-        GC.SuppressFinalize(this);
-    }
-}
-
-public record SearchResultContext(string DocumentTitle, string ContentText);
-
-/// <summary>
-/// Injects search results into the agent context as ephemeral messages.
-/// These messages are excluded from chat history storage via the storeInputMessageFilter.
-/// </summary>
-internal sealed class SearchResultsContextProvider : MessageAIContextProvider
-{
-    private readonly IReadOnlyList<SearchResultContext> _searchResults;
-
-    public SearchResultsContextProvider(IReadOnlyList<SearchResultContext> searchResults)
-    {
-        _searchResults = searchResults;
-    }
-
-    protected override ValueTask<IEnumerable<ChatMessage>> ProvideMessagesAsync(
-        InvokingContext context,
-        CancellationToken cancellationToken = default)
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine("## Search Results\n");
-        for (var i = 0; i < _searchResults.Count; i++)
-        {
-            var r = _searchResults[i];
-            sb.AppendLine($"### Source {i + 1}: {r.DocumentTitle}");
-            sb.AppendLine(r.ContentText);
-            sb.AppendLine();
+            history.Add(new UserChatMessage(userMessage));
         }
 
-        IEnumerable<ChatMessage> messages = [new ChatMessage(ChatRole.User, sb.ToString())];
-        return new ValueTask<IEnumerable<ChatMessage>>(messages);
+        ChatMessage[] snapshot;
+        lock (history)
+        {
+            snapshot = [.. history];
+        }
+
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] Chat [{conversationId[..8]}]: Sending {snapshot.Length} messages...");
+
+        ChatCompletion completion = await GetChatClient().CompleteChatAsync(snapshot);
+        var assistantText = completion.Content[0].Text;
+
+        lock (history)
+        {
+            history.Add(new AssistantChatMessage(assistantText));
+        }
+
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] Chat [{conversationId[..8]}]: Response complete ({assistantText.Length} chars).");
+
+        // Persist the new user + assistant turn to Table Storage
+        await PersistTurnAsync(conversationId, userMessage, assistantText);
+
+        return assistantText;
+    }
+
+    private List<ChatMessage> LoadHistory(string conversationId)
+    {
+        var messages = new List<ChatMessage> { new SystemChatMessage(SystemPrompt) };
+
+        try
+        {
+            var filter = $"PartitionKey eq '{conversationId}'";
+            foreach (var entity in _tableClient.Query<TableEntity>(filter))
+            {
+                var role = entity.GetString("Role");
+                var text = entity.GetString("Content");
+                if (role == "user")
+                    messages.Add(new UserChatMessage(text));
+                else if (role == "assistant")
+                    messages.Add(new AssistantChatMessage(text));
+            }
+
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] Chat [{conversationId[..8]}]: Loaded {messages.Count - 1} messages from history.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] Chat [{conversationId[..8]}]: Failed to load history: {ex.Message}");
+        }
+
+        return messages;
+    }
+
+    private async Task PersistTurnAsync(string conversationId, string userMessage, string assistantMessage)
+    {
+        try
+        {
+            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+            var userEntity = new TableEntity(conversationId, $"{timestamp:D20}_user")
+            {
+                ["Role"] = "user",
+                ["Content"] = userMessage,
+                ["CreatedAt"] = DateTimeOffset.UtcNow
+            };
+
+            var assistantEntity = new TableEntity(conversationId, $"{timestamp + 1:D20}_assistant")
+            {
+                ["Role"] = "assistant",
+                ["Content"] = assistantMessage,
+                ["CreatedAt"] = DateTimeOffset.UtcNow
+            };
+
+            var batch = new List<TableTransactionAction>
+            {
+                new(TableTransactionActionType.Add, userEntity),
+                new(TableTransactionActionType.Add, assistantEntity)
+            };
+
+            await _tableClient.SubmitTransactionAsync(batch);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] Chat [{conversationId[..8]}]: Failed to persist history: {ex.Message}");
+        }
     }
 }

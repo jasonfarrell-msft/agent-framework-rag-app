@@ -4,18 +4,12 @@
     <TargetFramework>net9.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AzureCosmosDisableNewtonsoftJsonCheck>true</AzureCosmosDisableNewtonsoftJsonCheck>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Azure.AI.OpenAI" Version="2.8.0-beta.1" />
     <PackageReference Include="Azure.Data.Tables" Version="12.11.0" />
     <PackageReference Include="Azure.Identity" Version="1.17.1" />
-    <PackageReference Include="Azure.Search.Documents" Version="11.7.0" />
-    <PackageReference Include="Microsoft.Agents.AI" Version="1.0.0-rc1" />
-    <PackageReference Include="Microsoft.Agents.AI.CosmosNoSql" Version="1.0.0-preview.260219.1" />
-    <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.0.0-rc1" />
-    <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.57.0" />
+    <PackageReference Include="OpenAI" Version="2.8.0" />
   </ItemGroup>
 
 </Project>
