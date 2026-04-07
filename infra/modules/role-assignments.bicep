@@ -27,7 +27,7 @@ var cognitiveServicesOpenAiUserRoleId = '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'
 var searchIndexDataReaderRoleId = '1407120a-92aa-4202-b7e9-c0e197c71c8f'
 
 // Search Service Contributor
-var searchServiceContributorRoleId = '7ca78c08-252a-4471-8644-bb5a5e366d16'
+var searchServiceContributorRoleId = '7ca78c08-252a-4471-8644-bb5ff32d4ba0'
 
 // Cosmos DB Built-in Data Contributor (data plane)
 var cosmosDataContributorRoleDefinitionId = '00000000-0000-0000-0000-000000000002'

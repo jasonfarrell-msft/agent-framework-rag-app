@@ -8,6 +8,9 @@
 #
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
 RESOURCE_GROUP="${1:?Usage: $0 <resource-group> [search-index-name]}"
 SEARCH_INDEX_NAME="${2:-multimodal-rag-1771601932521-single-manual}"
 
@@ -27,10 +30,6 @@ WEB_APP_NAME=$(az webapp list \
   --resource-group "${RESOURCE_GROUP}" \
   --query "[0].name" -o tsv)
 
-SWA_NAME=$(az staticwebapp list \
-  --resource-group "${RESOURCE_GROUP}" \
-  --query "[0].name" -o tsv)
-
 OPENAI_ACCOUNT_NAME=$(az cognitiveservices account list \
   --resource-group "${RESOURCE_GROUP}" \
   --query "[?kind=='OpenAI'] | [0].name" -o tsv)
@@ -41,7 +40,6 @@ COSMOS_ACCOUNT_NAME=$(az cosmosdb list \
 
 echo "Search service:  ${SEARCH_SERVICE_NAME}"
 echo "Web app:         ${WEB_APP_NAME}"
-echo "Static web app:  ${SWA_NAME}"
 echo "OpenAI account:  ${OPENAI_ACCOUNT_NAME}"
 echo "Cosmos account:  ${COSMOS_ACCOUNT_NAME}"
 
@@ -140,49 +138,7 @@ if [[ -n "${PRINCIPAL_ID}" ]]; then
   fi
 fi
 
-# ─── 4. Get the backend URL and configure the SWA to proxy to it ───────────────
-
-if [[ -n "${WEB_APP_NAME}" && -n "${SWA_NAME}" ]]; then
-  BACKEND_URL="https://${WEB_APP_NAME}.azurewebsites.net"
-  echo ""
-  echo "--- Linking SWA to backend ---"
-  echo "Backend URL: ${BACKEND_URL}"
-
-  # Azure Static Web Apps can link a backend via CLI
-  az staticwebapp backends link \
-    --name "${SWA_NAME}" \
-    --resource-group "${RESOURCE_GROUP}" \
-    --backend-resource-id "$(az webapp show \
-      --name "${WEB_APP_NAME}" \
-      --resource-group "${RESOURCE_GROUP}" \
-      --query id -o tsv)" \
-    --backend-region "$(az webapp show \
-      --name "${WEB_APP_NAME}" \
-      --resource-group "${RESOURCE_GROUP}" \
-      --query location -o tsv)" \
-    2>/dev/null || echo "Backend link already exists or SWA CLI extension not available. Configure manually if needed."
-fi
-
-# ─── 5. Update App Service CORS to include the SWA hostname ───────────────────
-
-if [[ -n "${WEB_APP_NAME}" && -n "${SWA_NAME}" ]]; then
-  SWA_HOSTNAME=$(az staticwebapp show \
-    --name "${SWA_NAME}" \
-    --resource-group "${RESOURCE_GROUP}" \
-    --query "defaultHostname" -o tsv)
-
-  echo ""
-  echo "--- Updating App Service CORS ---"
-  echo "Adding SWA origin: https://${SWA_HOSTNAME}"
-
-  az webapp cors add \
-    --name "${WEB_APP_NAME}" \
-    --resource-group "${RESOURCE_GROUP}" \
-    --allowed-origins "https://${SWA_HOSTNAME}" \
-    2>/dev/null || echo "CORS update failed. Update manually via portal."
-fi
-
-# ─── 6. Verify search index exists ────────────────────────────────────────────
+# ─── 4. Verify search index exists ────────────────────────────────────────────
 
 if [[ -n "${SEARCH_SERVICE_NAME}" ]]; then
   echo ""
@@ -213,21 +169,13 @@ if [[ -n "${SEARCH_SERVICE_NAME}" ]]; then
   fi
 fi
 
-# ─── 7. Print deployment summary ──────────────────────────────────────────────
+# ─── 5. Print deployment summary ──────────────────────────────────────────────
 
 echo ""
 echo "=== Deployment Summary ==="
 
 if [[ -n "${WEB_APP_NAME}" ]]; then
   echo "Backend API:      https://${WEB_APP_NAME}.azurewebsites.net/api/chat"
-fi
-
-if [[ -n "${SWA_NAME}" ]]; then
-  SWA_HOSTNAME=$(az staticwebapp show \
-    --name "${SWA_NAME}" \
-    --resource-group "${RESOURCE_GROUP}" \
-    --query "defaultHostname" -o tsv 2>/dev/null || echo "unknown")
-  echo "Frontend (SWA):   https://${SWA_HOSTNAME}"
 fi
 
 echo ""

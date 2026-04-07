@@ -2,12 +2,14 @@ using Example.ChatApi.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Allow CORS from the frontend dev server
+// Allow CORS from the frontend dev server and deployed SWA
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.WithOrigins("http://localhost:5173")
+        policy.WithOrigins(
+                  "http://localhost:5173",
+                  "https://app-pseg-main-eus2-mx01.azurewebsites.net")
               .AllowAnyHeader()
               .AllowAnyMethod();
     });

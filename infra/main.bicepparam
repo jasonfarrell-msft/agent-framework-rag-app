@@ -1,6 +1,6 @@
 using 'main.bicep'
 
-param baseName = 'pseg-main-eus2-mx01'
+param baseName = 'pseg-main-eus2-mx02'
 
 param location = 'eastus2'
 
@@ -15,5 +15,6 @@ param searchIndexName = 'multimodal-rag-1771601932521-single-manual'
 
 param tags = {
   project: 'agent-framework-rag-app'
-  environment: 'dev'
+  environment: 'dev' 
+  SecurityControl: 'Ignore'
 }
