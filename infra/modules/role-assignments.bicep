@@ -13,6 +13,9 @@ param cosmosAccountId string
 @description('Name of the Cosmos DB account (used for existing resource reference).')
 param cosmosAccountName string
 
+@description('Whether Search resources were deployed.')
+param deploySearch bool = true
+
 @description('Resource ID of the Azure AI Search service.')
 param searchServiceId string
 
@@ -45,7 +48,7 @@ resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' existi
   name: cosmosAccountName
 }
 
-resource searchService 'Microsoft.Search/searchServices@2024-06-01-preview' existing = {
+resource searchService 'Microsoft.Search/searchServices@2024-06-01-preview' existing = if (deploySearch) {
   name: searchServiceName
 }
 
@@ -63,7 +66,7 @@ resource openAiRoleAppService 'Microsoft.Authorization/roleAssignments@2022-04-0
 
 // ─── Azure AI Search: Search Index Data Reader ────────────────────────────────
 
-resource searchDataReaderRoleAppService 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+resource searchDataReaderRoleAppService 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (deploySearch) {
   name: guid(searchServiceId, appServicePrincipalId, searchIndexDataReaderRoleId)
   scope: searchService
   properties: {
@@ -75,7 +78,7 @@ resource searchDataReaderRoleAppService 'Microsoft.Authorization/roleAssignments
 
 // ─── Azure AI Search: Search Service Contributor (management) ─────────────────
 
-resource searchContributorRoleAppService 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+resource searchContributorRoleAppService 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (deploySearch) {
   name: guid(searchServiceId, appServicePrincipalId, searchServiceContributorRoleId)
   scope: searchService
   properties: {

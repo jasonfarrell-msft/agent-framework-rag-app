@@ -26,6 +26,9 @@ param cosmosContainerName string = 'conversations'
 @description('Azure AI Search index name.')
 param searchIndexName string = 'multimodal-rag-1771601932521-single-manual'
 
+@description('Whether to deploy Azure AI Search (set false if region has no capacity).')
+param deploySearch bool = true
+
 @description('Tags to apply to all resources.')
 param tags object = {}
 
@@ -72,7 +75,7 @@ module cosmos 'modules/cosmos.bicep' = {
   }
 }
 
-module search 'modules/search.bicep' = {
+module search 'modules/search.bicep' = if (deploySearch) {
   params: {
     location: location
     searchServiceName: searchServiceName
@@ -113,8 +116,9 @@ module roleAssignments 'modules/role-assignments.bicep' = {
     openAiAccountName: openAiAccountName
     cosmosAccountId: cosmos.outputs.id
     cosmosAccountName: cosmosAccountName
-    searchServiceId: search.outputs.id
-    searchServiceName: searchServiceName
+    deploySearch: deploySearch
+    searchServiceId: deploySearch ? search.outputs.id : ''
+    searchServiceName: deploySearch ? searchServiceName : ''
   }
 }
 
@@ -133,7 +137,7 @@ output openAiEndpoint string = openAi.outputs.endpoint
 output cosmosEndpoint string = cosmos.outputs.endpoint
 
 @description('Azure AI Search endpoint.')
-output searchEndpoint string = search.outputs.endpoint
+output searchEndpoint string = deploySearch ? search.outputs.endpoint : ''
 
 @description('Web App principal ID (for manual role verifications).')
 output webAppPrincipalId string = appService.outputs.principalId
