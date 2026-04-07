@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL || 'https://app-pseg-main-eus2-mx01.azurewebsites.net/api/chat';
+const API_URL = import.meta.env.VITE_API_URL || '/api/chat';
 
 export async function sendMessage(query, conversationId) {
   const res = await fetch(API_URL, {

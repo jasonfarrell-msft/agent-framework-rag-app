@@ -7,9 +7,8 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'https://app-pseg-main-eus2-mx01.azurewebsites.net',
+        target: 'http://localhost:5001',
         changeOrigin: true,
-        secure: true,
       },
     },
   },

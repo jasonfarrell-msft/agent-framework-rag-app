@@ -45,8 +45,14 @@ function App() {
   return (
     <div className="chat-wrapper">
       <div className="chat-container">
-        <div className="chat-header d-flex align-items-center">
+        <div className="chat-header d-flex align-items-center justify-content-between">
           <span>Chat</span>
+          <button
+            className="btn btn-sm btn-outline-light"
+            onClick={() => { setMessages([]); setConversationId(null); }}
+          >
+            New Chat
+          </button>
         </div>
 
         <div className="chat-messages" ref={messagesContainerRef}>
